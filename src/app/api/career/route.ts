@@ -1,124 +1,47 @@
-import { NextResponse } from "next/server";
-
-// Define types for the API response
-interface ResultSet {
-  name: string;
-  headers: string[];
-  rowSet: (string | number | null)[][];
-}
-
-interface NBAApiResponse {
-  resultSets: ResultSet[];
-}
-
-// Define types for the cleaned data structure
-interface CareerStats {
-    [key: string]: number | null; // Index signature allowing dynamic keys
-  }
-
-interface CleanedData {
-  regularSeason: CareerStats;
-  postSeason: CareerStats;
-}
-
-const API_URL =
-  "https://stats.nba.com/stats/playercareerstats?LeagueID=00&PerMode=Totals&PlayerID=2544"; // LeBron James' PlayerID
+import axios from 'axios';
+import * as cheerio from 'cheerio';
+import { NextResponse } from 'next/server';
 
 export async function GET() {
+  const url = 'https://www.nbcsports.com/nba/lebron-james/9844/stats';
+
   try {
-    console.log("Fetching player data...");
+    // Fetch the HTML content of the page
+    const { data } = await axios.get(url);
+    
+    // Load the HTML data into Cheerio
+    const $ = cheerio.load(data);
+    
+    // Find the last row in the <tfoot> section
+    const statsRow = $('tfoot tr').last();
 
-    // Fetch the data from the NBA Stats API
-    const response = await fetch(API_URL, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Referer: "https://www.nba.com/",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch career totals: ${response.statusText}`);
-    }
-
-    // Parse the JSON response
-    const data: NBAApiResponse = await response.json();
-
-    // Extract result sets
-    const regularSeasonSet = data.resultSets.find((set) => set.name === "CareerTotalsRegularSeason");
-    const postseasonSet = data.resultSets.find((set) => set.name === "CareerTotalsPostSeason");
-
-    if (!regularSeasonSet || !regularSeasonSet.rowSet[0]) {
-      throw new Error("CareerTotalsRegularSeason data not found");
-    }
-
-    if (!postseasonSet || !postseasonSet.rowSet[0]) {
-      throw new Error("CareerTotalsPostSeason data not found");
-    }
-
-    // Map headers to rowSet values for Regular Season
-    const mapStats = (
-      headers: string[],
-      row: (string | number | null)[]
-    ): CareerStats => {
-      return headers.reduce((acc, header, index) => {
-        acc[header as keyof CareerStats] = row[index] as number | null;
-        return acc;
-      }, {} as CareerStats);
+    // Extract the stats from each column in the row
+    const stats = {
+      games: statsRow.find('td').eq(2).text().trim(), // G
+      minutes: statsRow.find('td').eq(3).text().trim(), // MIN
+      points: statsRow.find('td').eq(4).text().trim(), // PTS
+      rebounds: statsRow.find('td').eq(5).text().trim(), // REB
+      offensiveRebounds: statsRow.find('td').eq(6).text().trim(), // OREB
+      assists: statsRow.find('td').eq(7).text().trim(), // AST
+      steals: statsRow.find('td').eq(8).text().trim(), // STL
+      blocks: statsRow.find('td').eq(9).text().trim(), // BLK
+      fouls: statsRow.find('td').eq(10).text().trim(), // PF
+      turnovers: statsRow.find('td').eq(11).text().trim(), // TO
+      fieldGoalsMade: statsRow.find('td').eq(12).text().trim(), // FGM
+      fieldGoalsAttempted: statsRow.find('td').eq(13).text().trim(), // FGA
+      fieldGoalPercentage: statsRow.find('td').eq(14).text().trim(), // FG%
+      threePointersMade: statsRow.find('td').eq(15).text().trim(), // 3PTM
+      threePointersAttempted: statsRow.find('td').eq(16).text().trim(), // 3PTA
+      threePointPercentage: statsRow.find('td').eq(17).text().trim(), // 3PT%
+      freeThrowsMade: statsRow.find('td').eq(18).text().trim(), // FTM
+      freeThrowsAttempted: statsRow.find('td').eq(19).text().trim(), // FTA
+      freeThrowPercentage: statsRow.find('td').eq(20).text().trim(), // FT%
     };
 
-    const careerTotalsRegular = mapStats(regularSeasonSet.headers, regularSeasonSet.rowSet[0]);
-    const careerTotalsPostSeason = mapStats(postseasonSet.headers, postseasonSet.rowSet[0]);
-
-    // Clean up the data to match the desired structure
-    const cleanedData: CleanedData = {
-      regularSeason: {
-        points: careerTotalsRegular.PTS,
-        rebounds: careerTotalsRegular.REB,
-        assists: careerTotalsRegular.AST,
-        steals: careerTotalsRegular.STL,
-        blocks: careerTotalsRegular.BLK,
-        gamesPlayed: careerTotalsRegular.GP,
-        fieldGoalPercentage: careerTotalsRegular.FG_PCT,
-        threePointPercentage: careerTotalsRegular.FG3_PCT,
-        freeThrowPercentage: careerTotalsRegular.FT_PCT,
-        minutes: careerTotalsRegular.MIN,
-      },
-      postSeason: {
-        points: careerTotalsPostSeason.PTS,
-        rebounds: careerTotalsPostSeason.REB,
-        assists: careerTotalsPostSeason.AST,
-        steals: careerTotalsPostSeason.STL,
-        blocks: careerTotalsPostSeason.BLK,
-        gamesPlayed: careerTotalsPostSeason.GP,
-        fieldGoalPercentage: careerTotalsPostSeason.FG_PCT,
-        threePointPercentage: careerTotalsPostSeason.FG3_PCT,
-        freeThrowPercentage: careerTotalsPostSeason.FT_PCT,
-        minutes: careerTotalsPostSeason.MIN,
-      },
-    };
-
-    console.log("Player data fetched successfully:", cleanedData);
-
-    // Return the cleaned data with cache control headers
-    return NextResponse.json(cleanedData, {
-      headers: {
-        "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-        Pragma: "no-cache",
-        Expires: "0",
-        "Surrogate-Control": "no-store",
-      },
-    });
+    // Return the extracted stats as a JSON response
+    return NextResponse.json(stats);
   } catch (error) {
-    console.error("Error fetching player data:", error);
-
-    return NextResponse.json(
-      {
-        success: false,
-        message: (error as Error).message || "An unexpected error occurred.",
-      },
-      { status: 500 }
-    );
+    console.error('Error fetching player stats:', error);
+    return NextResponse.json({ error: 'Failed to fetch stats' }, { status: 500 });
   }
 }

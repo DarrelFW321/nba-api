@@ -1,93 +1,109 @@
 import { NextResponse } from "next/server";
+import * as cheerio from "cheerio";
 
-const DATA_SOURCE_URL = "https://stats.nba.com/stats/commonplayerinfo?LeagueID=00&PlayerID=2544"; // LeBron James' PlayerID
+const PLAYER_URL = "https://www.basketball-reference.com/players/j/jamesle01.html"; // LeBron James' page
 
-// Define types for the API response
-interface ResultSet {
+// Define types for the player profile
+interface PlayerProfile {
   name: string;
-  headers: string[]; // Array of column names (e.g., ["FIRST_NAME", "LAST_NAME"])
-  rowSet: (string | number | null)[][]; // Array of rows (each row is an array of values)
+  team: string;
+  position: string;
+  height: string;
+  weight: string;
+  height_metric: string;
+  weight_metric: string;
+  country: string;
+  birthdate: string;
+  draft: string;
+  experience: string;
+  shootingHand: string;
+  lastAttended: string;
 }
-
-interface NBAApiResponse {
-  resultSets: ResultSet[];
-}
-
-// Create a mapped type for the PlayerProfile based on dynamic headers
-type PlayerProfile = {
-  [key: string]: string | number | null | undefined;
-};
 
 export async function GET() {
   try {
-    console.log("Fetching player data...");
+    console.log("Fetching player profile from Basketball Reference...");
 
-    const response = await fetch(DATA_SOURCE_URL, {
+    // Fetch the HTML of the player profile page
+    const response = await fetch(PLAYER_URL, {
       headers: {
-        Referer: "https://www.nba.com/",
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36",
       },
     });
 
     if (!response.ok) {
-      throw new Error(`NBA API returned status ${response.status}`);
+      throw new Error(`Failed to fetch player profile: ${response.statusText}`);
     }
 
-    // Parse the response with strict typing
-    const data: NBAApiResponse = await response.json();
+    // Load the HTML into Cheerio for parsing
+    const html = await response.text();
+    const $ = cheerio.load(html);
 
-    // Find the relevant result set
-    const playerInfo = data.resultSets.find(
-      (set) => set.name === "CommonPlayerInfo"
-    );
+    // Extract required data using Cheerio selectors
+    const name = $("h1 span").text().trim(); // LeBron James
 
-    if (!playerInfo) {
-      throw new Error("Player info not found in API response.");
-    }
+    // Extract position and clean up extra spaces (removes "▪ Shoots")
+    const positionText = $("p:contains('Position')").text().split(":")[1]?.trim() ?? "";
+    const position = positionText.replace(/\s+/g, " ").replace('▪ Shoots', '').trim();
 
-    const playerStats = playerInfo.rowSet[0]; // Single row for player data
-    const headers = playerInfo.headers;
+    // Dynamically extract height and weight from the p tag
+    const heightWeightText = $("p:contains('Position') + p").text().trim(); // This is the paragraph after "Position"
+    
+    // Dynamically extract height (in format 6-9) and weight (in format 250lb)
+    const heightMatch = heightWeightText.match(/(\d{1,2}-\d{1,2})/); // For height like "6-9"
+    const weightMatch = heightWeightText.match(/(\d{3}lb)/); // For weight like "250lb"
 
-    if (!playerStats || !headers) {
-      throw new Error("Incomplete player data received from API.");
-    }
+    const height = heightMatch ? heightMatch[0].replace(/\s+/g, ' ') : "";
+    const weight = weightMatch ? weightMatch[0].replace(/\s+/g, ' ') : "";
 
-    // Map headers to values to create the PlayerProfile object
-    const playerData: PlayerProfile = headers.reduce((acc, header, index) => {
-      acc[header] = playerStats[index] ?? null;
-      return acc;
-    }, {} as PlayerProfile);
+    // Extract metric values from the text in parentheses (e.g., "206cm, 113kg")
+    const metricMatch = heightWeightText.match(/\((\d{3}cm),\s*(\d{3}kg)\)/);
+    const height_metric = metricMatch ? metricMatch[1] : "";
+    const weight_metric = metricMatch ? metricMatch[2] : "";
 
-    // Build cleaned response
-    const cleanedData = {
-      name: `${playerData.FIRST_NAME} ${playerData.LAST_NAME}`,
-      team: playerData.TEAM_NAME,
-      jersey: playerData.JERSEY,
-      position: playerData.POSITION,
-      ppg: playerData.PPG,
-      rpg: playerData.RPG,
-      apg: playerData.APG,
-      pie: playerData.PIE,
-      height: playerData.HEIGHT,
-      weight: playerData.WEIGHT,
-      country: playerData.COUNTRY,
-      lastAttended: playerData.LAST_AFFILIATION,
-      age: playerData.AGE,
-      birthdate: playerData.BIRTHDATE,
-      draft: playerData.DRAFT_YEAR
-        ? `${playerData.DRAFT_YEAR} R${playerData.DRAFT_ROUND} Pick ${playerData.DRAFT_NUMBER}`
-        : "Undrafted",
-      experience: `${playerData.SEASON_EXP} Years`,
+    // Extract other information
+    const team = $("p:contains('Team') a").text().trim(); // Los Angeles Lakers
+    const country = $("p:contains('Born') span").last().text().trim(); // Country
+    const birthdate = $("p:contains('Born') span").first().text().trim().replace(/\n/g, ' ').replace(/\s+/g, ' ').trim(); // Clean up newline and extra spaces
+    const draftText = $("p:contains('Draft')").text().split(":")[1]?.trim() ?? "Undrafted"; // Draft info
+
+    // Fix the draft dynamic part
+    const draft = draftText.replace(/LeBron James was drafted by.*/i, "").trim();
+    const draftDynamic = `LeBron James was drafted by ${name}`;
+
+    const finalDraft = draft ? `${draft}, ${draftDynamic}` : draftDynamic; // Combine cleaned draft text with dynamic name if needed
+    const experience = $("p:contains('Experience')").text().split(":")[1]?.trim() ?? ""; // Experience
+    
+    // Add shooting hand info (assumed from "Shoots" text)
+    const shootingHand = $("p:contains('Shoots')").text().includes("Right") ? "Right Handed" : "Left Handed";
+
+    // Extract last attended (High School)
+    const lastAttended = $("p:contains('High School')").text().split(":")[1]?.trim() ?? "";
+
+    // Clean up and format the data properly
+    const playerProfile: PlayerProfile = {
+      name,
+      team,
+      position,
+      height,
+      weight,
+      height_metric,
+      weight_metric,
+      country,
+      birthdate,
+      draft: finalDraft,
+      experience,
+      shootingHand,
+      lastAttended,
     };
 
-    console.log("Player data fetched successfully:", cleanedData);
+    console.log("Player profile fetched successfully:", playerProfile);
 
-    return NextResponse.json(cleanedData);
+    return NextResponse.json(playerProfile);
   } catch (error) {
-    console.error("Error fetching player data:", (error as Error).message);
+    console.error("Error fetching player profile:", (error as Error).message);
     return NextResponse.json(
-      { error: "Failed to fetch player data. Please try again later." },
+      { error: "Failed to fetch player profile. Please try again later." },
       { status: 500 }
     );
   }

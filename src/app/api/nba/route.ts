@@ -1,77 +1,47 @@
-import { NextResponse } from 'next/server';
+import { NextResponse } from "next/server";
+import * as cheerio from "cheerio";
 
-// Define types for the API response structure
-interface ResultSet {
-  name: string;
-  headers: string[];
-  rowSet: (string | number | null)[][];
-}
+const PLAYER_URL = "https://www.basketball-reference.com/players/j/jamesle01.html"; // LeBron James' page
 
-interface NBAApiResponse {
-  resultSets: ResultSet[];
-}
-
-interface CareerStats {
-  [key: string]: string | number | null; // Using a dynamic key to handle any column name
+// Define types for the player profile
+interface PlayerProfile {
+  team: string;
 }
 
 export async function GET() {
   try {
-    console.log('Handler started for LeBron James career totals...');
+    console.log("Fetching player profile from Basketball Reference...");
 
-    // Fetching LeBron James' career stats from the NBA API
-    const response = await fetch(
-      'https://stats.nba.com/stats/playercareerstats?LeagueID=00&PerMode=Totals&PlayerID=2544',
-      {
-        headers: {
-          Referer: 'https://www.nba.com/',
-        },
-      }
-    );
-
-    console.log('Data fetched from the NBA API for LeBron James...');
-    if (!response.ok) {
-      throw new Error(`NBA API returned status ${response.status}`);
-    }
-
-    // Parsing JSON response
-    const data: NBAApiResponse = await response.json();
-    console.log('Data parsed from the NBA API response...');
-
-    // Extracting result set
-    const resultSet = data.resultSets.find((set: ResultSet) => set.name === 'SeasonTotalsRegularSeason');
-    if (!resultSet) {
-      throw new Error('SeasonTotalsRegularSeason data not found in result sets.');
-    }
-
-    // Extracting career stats
-    const headers = resultSet.headers;
-    const rows = resultSet.rowSet;
-    const careerTotals = rows.map((row: (string | number | null)[]) => {
-      const record: CareerStats = {}; // Define the record type to handle dynamic keys
-      headers.forEach((header: string, index: number) => {
-        record[header] = row[index];
-      });
-      return record;
-    });
-
-    // Calculate total points across all seasons
-    const totalPoints = careerTotals.reduce((sum: number, season: CareerStats) => sum + (season.PTS as number || 0), 0);
-
-    // Sending response
-    console.log('Response sent successfully.');
-    return NextResponse.json({
-      totalPoints,
-    });
-  } catch (error) {
-    console.error('Error occurred:', error);
-
-    // Sending error response
-    return NextResponse.json(
-      {
-        success: false,
-        message: (error as Error).message || 'An unexpected error occurred.',
+    // Fetch the HTML of the player profile page
+    const response = await fetch(PLAYER_URL, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/89.0.4389.82 Safari/537.36",
       },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch player profile: ${response.statusText}`);
+    }
+
+    // Load the HTML into Cheerio for parsing
+    const html = await response.text();
+    const $ = cheerio.load(html);
+
+    // Extract the team name and get the last word
+    const teamText = $("p:contains('Team') a").text().trim(); 
+    const team = teamText.split(" ").pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') ?? ""; 
+
+    const playerProfile: PlayerProfile = {
+      team,
+    };
+
+    console.log("Player team fetched successfully:", playerProfile);
+
+    return NextResponse.json(playerProfile);
+  } catch (error) {
+    console.error("Error fetching player profile:", (error as Error).message);
+    return NextResponse.json(
+      { error: "Failed to fetch player profile. Please try again later." },
       { status: 500 }
     );
   }
