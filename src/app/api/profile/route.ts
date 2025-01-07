@@ -69,9 +69,7 @@ export async function GET() {
 
     // Fix the draft dynamic part
     const draft = draftText.replace(/LeBron James was drafted by.*/i, "").trim();
-    const draftDynamic = `LeBron James was drafted by ${name}`;
 
-    const finalDraft = draft ? `${draft}, ${draftDynamic}` : draftDynamic; // Combine cleaned draft text with dynamic name if needed
     const experience = $("p:contains('Experience')").text().split(":")[1]?.trim() ?? ""; // Experience
     
     // Add shooting hand info (assumed from "Shoots" text)
@@ -91,7 +89,7 @@ export async function GET() {
       weight_metric,
       country,
       birthdate,
-      draft: finalDraft,
+      draft,
       experience,
       shootingHand,
       lastAttended,
